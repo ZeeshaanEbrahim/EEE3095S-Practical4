@@ -116,7 +116,7 @@ uint32_t Drum_LUT[NS] = {
 
 
 // TODO: Equation to calculate TIM2_Ticks
-uint32_t TIM2_Ticks = 0; // How often to write new LUT value
+uint32_t TIM2_Ticks = 125; // How often to write new LUT value -- TIM2CLK/NS*FSIGNAL
 uint32_t DestAddress = (uint32_t) &(TIM3->CCR3); // Write LUT TO TIM3->CCR3 to modify PWM duty cycle
 
 
