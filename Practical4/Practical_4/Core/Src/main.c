@@ -36,7 +36,7 @@
 // TODO: Add values for below variables
 #define NS    128U    // Number of samples in LUT
 #define TIM2CLK 16000000UL  // STM Clock frequency: Hint You might want to check the ioc file
-#define F_SIGNAL  1000000UL	// Frequency of output analog signal --- DAC UPDATE RATE 1MS/s - from Datasheet
+#define F_SIGNAL  1000UL	// Frequency of output analog signal --- DAC UPDATE RATE 1MS/s - from Datasheet - MAX FREQUENCY = 7.8125HZ, 1KHZ safe conservative
 
 /* USER CODE END PD */
 
