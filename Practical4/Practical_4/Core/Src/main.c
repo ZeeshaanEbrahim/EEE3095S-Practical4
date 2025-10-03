@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "stm32f4xx.h"
+#include "stm32f4xx_hal_tim.h"
 #include "lcd_stm32f4.h"
 /* USER CODE END Includes */
 
@@ -37,7 +38,7 @@
 #define NS    128U    // Number of samples in LUT
 #define TIM2CLK 16000000UL  // STM Clock frequency: Hint You might want to check the ioc file
 #define F_SIGNAL  1000UL	// Frequency of output analog signal --- DAC UPDATE RATE 1MS/s - from Datasheet - MAX FREQUENCY = 7.8125HZ, 1KHZ safe conservative
-
+#define NUM_WAVEFORMS 6
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -120,6 +121,19 @@ uint32_t TIM2_Ticks = 125; // How often to write new LUT value -- TIM2CLK/NS*FSI
 uint32_t DestAddress = (uint32_t) &(TIM3->CCR3); // Write LUT TO TIM3->CCR3 to modify PWM duty cycle
 
 
+uint32_t *waveforms[NUM_WAVEFORMS] = {
+    sine_LUT, saw_LUT, triangle_LUT, piano_LUT, guitar_LUT, drum_LUT
+};
+char *waveform_names[NUM_WAVEFORMS] = {
+    "Sine", "Sawtooth", "Triangle", "Piano", "Guitar", "Drum"
+};
+
+volatile uint8_t waveform_index = 0;
+
+// --- Debounce support ---
+volatile uint32_t last_button_press = 0;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,14 +183,14 @@ int main(void)
   MX_DMA_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  MX_LCD_Init();
+  init_LCD();
   /* USER CODE BEGIN 2 */
   // TODO: Start TIM3 in PWM mode on channel 3
-  	 if(HAL_TIM_PWM_Start(&htim3,TIM_Channel_3) != HAL_OK){
+  	 if(HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_3) != HAL_OK){
   		 Error_Handler();
   	 }
   // TODO: Start TIM2 in Output Compare (OC) mode on channel 1
-  	 if(HAL_TIM_OC_Start(&htim2,TIM_Channel_1) != HAL_OK){
+  	 if(HAL_TIM_OC_Start(&htim2,TIM_CHANNEL_1) != HAL_OK){
   		 Error_Handler();
   	 }
   // TODO: Start DMA in IT mode on TIM2->CH1. Source is LUT and Dest is TIM3->CCR3; start with Sine LUT
@@ -187,10 +201,10 @@ int main(void)
   		 Error_Handler();
   	 }
   // TODO: Write current waveform to LCD(Sine is the first waveform)
-  	LCD_Clear();
-  	LCD_DisplayString("Sine");
+  	init_LCD();
+  	lcd_putstring("Sine");
   // TODO: Enable DMA (start transfer from LUT to CCR)
-  	HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
+  	__HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -463,11 +477,39 @@ void EXTI0_IRQHandler(void){
 
 	// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
 	// HINT: Consider using C's "switch" function to handle LUT changes
+	 if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
+	    {
+	        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+
+	        uint32_t now = HAL_GetTick(); // current time in ms
+	        if ((now - last_button_press) < 200) {
+	            // Ignore if pressed again within 200 ms
+	            return;
+	        }
+	        last_button_press = now;
+
+	        // --- Disable DMA safely before switching ---
+	        __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
+	        HAL_DMA_Abort_IT(htim2.hdma[1]); // channel 1 for TIM2 CC1
+
+	        // --- Move to next waveform ---
+	        waveform_index = (waveform_index + 1) % NUM_WAVEFORMS;
+
+	        // --- Restart DMA transfer with new LUT ---
+	        if (HAL_TIM_OC_Start_DMA(&htim2,
+	                                 TIM_CHANNEL_1,
+	                                 waveforms[waveform_index],
+	                                 NS) != HAL_OK)
+	        {
+	            Error_Handler();
+	        }
+
+	        // --- Update LCD ---
+	        lcd_command(CLEAR);
+	        lcd_putstring((char*)waveform_names[waveform_index]);
+	    }
 
 
-
-
-	HAL_GPIO_EXTI_IRQHandler(Button0_Pin); // Clear interrupt flags
 }
 /* USER CODE END 4 */
 
