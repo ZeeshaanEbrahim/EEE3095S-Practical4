@@ -131,7 +131,7 @@ char *waveform_names[NUM_WAVEFORMS] = {
 volatile uint8_t waveform_index = 0;
 
 // --- Debounce support ---
-volatile uint32_t last_button_press = 0;
+volatile uint32_t last_button_tick = 0;
 
 
 /* USER CODE END PV */
@@ -477,38 +477,35 @@ void EXTI0_IRQHandler(void){
 
 	// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
 	// HINT: Consider using C's "switch" function to handle LUT changes
-	 if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
+
+	uint32_t tick = HAL_GetTick(); // current time in ms
+
+	    // Check interrupt for PA0
+	    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
 	    {
-	        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
-
-	        uint32_t now = HAL_GetTick(); // current time in ms
-	        if ((now - last_button_press) < 200) {
-	            // Ignore if pressed again within 200 ms
-	            return;
-	        }
-	        last_button_press = now;
-
-	        // --- Disable DMA safely before switching ---
-	        __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
-	        HAL_DMA_Abort_IT(htim2.hdma[1]); // channel 1 for TIM2 CC1
-
-	        // --- Move to next waveform ---
-	        waveform_index = (waveform_index + 1) % NUM_WAVEFORMS;
-
-	        // --- Restart DMA transfer with new LUT ---
-	        if (HAL_TIM_OC_Start_DMA(&htim2,
-	                                 TIM_CHANNEL_1,
-	                                 waveforms[waveform_index],
-	                                 NS) != HAL_OK)
+	        // Debounce: ignore presses within 200 ms
+	        if ((tick - last_button_tick) > 200)
 	        {
-	            Error_Handler();
+	            last_button_tick = tick;
+
+	            // Clear the interrupt flag
+	            __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+
+	            // Stop DMA transfer safely
+	            __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
+	            HAL_DMA_Abort_IT(htim2.hdma[TIM_DMA_ID_CC1]);
+
+	            // Increment waveform index (wrap around)
+	            waveform_index = (waveform_index + 1) % NUM_WAVEFORMS;
+
+	            // Update LCD
+	            lcd_command(CLEAR);
+	            lcd_putstring((char*)waveform_names[waveform_index]);
+
+	            // Re-enable DMA transfer
+	            __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
 	        }
-
-	        // --- Update LCD ---
-	        lcd_command(CLEAR);
-	        lcd_putstring((char*)waveform_names[waveform_index]);
 	    }
-
 
 }
 /* USER CODE END 4 */
