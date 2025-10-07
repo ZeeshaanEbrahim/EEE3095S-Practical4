@@ -117,7 +117,7 @@ uint32_t drum_LUT[NS] = {
 
 
 // TODO: Equation to calculate TIM2_Ticks
-uint32_t TIM2_Ticks = 125; // How often to write new LUT value -- TIM2CLK/NS*FSIGNAL
+enum { TIM2_Ticks = (uint32_t)(TIM2CLK / (NS * F_SIGNAL)) }; // How often to write new LUT value -- TIM2CLK/NS*FSIGNAL
 uint32_t DestAddress = (uint32_t) &(TIM3->CCR3); // Write LUT TO TIM3->CCR3 to modify PWM duty cycle
 
 
@@ -470,43 +470,45 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void EXTI0_IRQHandler(void){
+void EXTI0_IRQHandler(void)
+{
+    // Was this PA0?
+    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
+    {
+        uint32_t now = HAL_GetTick();
 
-	// TODO: Debounce using HAL_GetTick()
+        // Clear the EXTI flag early
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
 
+        // Debounce: ignore if <200 ms since last valid press
+        if ((now - last_button_tick) < 200U) {
+            return;
+        }
+        last_button_tick = now;
 
-	// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
-	// HINT: Consider using C's "switch" function to handle LUT changes
+        // 1) Stop TIM2 CC1 DMA requests and abort any in-flight transfer
+        __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
+        HAL_DMA_Abort_IT(htim2.hdma[TIM_DMA_ID_CC1]);   // safe to call even if idle
 
-	uint32_t tick = HAL_GetTick(); // current time in ms
+        // 2) Advance waveform (wrap 0..NUM_WAVEFORMS-1)
+        waveform_index = (uint8_t)((waveform_index + 1U) % NUM_WAVEFORMS);
 
-	    // Check interrupt for PA0
-	    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
-	    {
-	        // Debounce: ignore presses within 200 ms
-	        if ((tick - last_button_tick) > 200)
-	        {
-	            last_button_tick = tick;
+        // 3) Update the LCD label
+        lcd_command(CLEAR);
+        lcd_putstring((char*)waveform_names[waveform_index]);
 
-	            // Clear the interrupt flag
-	            __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+        // 4) Re-start DMA with the NEW source buffer → TIM3->CCR3, length = NS
+        if (HAL_DMA_Start_IT(&hdma_tim2_ch1,
+                             (uint32_t)waveforms[waveform_index],     // <— NEW LUT
+                             (uint32_t)&(htim3.Instance->CCR3),       // destination
+                             NS) != HAL_OK)
+        {
+            Error_Handler();
+        }
 
-	            // Stop DMA transfer safely
-	            __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
-	            HAL_DMA_Abort_IT(htim2.hdma[TIM_DMA_ID_CC1]);
-
-	            // Increment waveform index (wrap around)
-	            waveform_index = (waveform_index + 1) % NUM_WAVEFORMS;
-
-	            // Update LCD
-	            lcd_command(CLEAR);
-	            lcd_putstring((char*)waveform_names[waveform_index]);
-
-	            // Re-enable DMA transfer
-	            __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
-	        }
-	    }
-
+        // 5) Re-enable TIM2 CC1 DMA requests so samples resume on next CC1 event
+        __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
+    }
 }
 /* USER CODE END 4 */
 
