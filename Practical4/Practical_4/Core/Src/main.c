@@ -15,15 +15,20 @@
   *
   ******************************************************************************
   */
+
+
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+//include lookup tables
+//#include "luts.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+//for strlen in display_waveform
+#include <string.h>
 #include "stm32f4xx.h"
-#include "stm32f4xx_hal_tim.h"
 #include "lcd_stm32f4.h"
 /* USER CODE END Includes */
 
@@ -35,10 +40,22 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // TODO: Add values for below variables
-#define NS    128U    // Number of samples in LUT
-#define TIM2CLK 16000000UL  // STM Clock frequency: Hint You might want to check the ioc file
-#define F_SIGNAL  1000UL	// Frequency of output analog signal --- DAC UPDATE RATE 1MS/s - from Datasheet - MAX FREQUENCY = 7.8125HZ, 1KHZ safe conservative
-#define NUM_WAVEFORMS 6
+//Task 2
+#define NS     128   // Number of samples in LUT
+#define TIM2CLK  16000000 // STM Clock frequency: is 16MHz
+#define F_SIGNAL  0.5	// Frequency of output analog signal is 100Hz target to help with noisy targets
+
+//defining debounce delay for the button press in ms
+#define DEBOUNCE_DELAY 200
+
+
+//defining enum to easily track the waveform
+typedef enum {
+	WAVE_SINE, WAVE_SAW, WAVE_TRIANGLE, WAVE_PIANO, WAVE_GUITAR, WAVE_DRUM, NUM_WAVEFORMS
+} WaveformType;
+
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,85 +70,39 @@ DMA_HandleTypeDef hdma_tim2_ch1;
 
 /* USER CODE BEGIN PV */
 // TODO: Add code for global variables, including LUTs
-uint32_t sine_LUT[NS]= {2047, 2147, 2248, 2347, 2446, 2545, 2641, 2737, 2831, 2922, 3012, 3100, 3185, 3267, 3346, 3422, 3495, 3564, 3630, 3692, 3749, 3803, 3853, 3898, 3939, 3975, 4006, 4033, 4055, 4072, 4085, 4092, 4095, 4092, 4085, 4072, 4055, 4033, 4006, 3975, 3939, 3898, 3853, 3803, 3749, 3692, 3630, 3564, 3495, 3422, 3346, 3267, 3185, 3100, 3012, 2922, 2831, 2737, 2641, 2545, 2446, 2347, 2248, 2147, 2047, 1947, 1846, 1747, 1648, 1549, 1453, 1357, 1263, 1172, 1082, 994, 909, 827, 748, 672, 599, 530, 464, 402, 345, 291, 241, 196, 155, 119, 88, 61, 39, 22, 9, 2, 0, 2, 9, 22, 39, 61, 88, 119, 155, 196, 241, 291, 345, 402, 464, 530, 599, 672, 748, 827, 909, 994, 1082, 1172, 1263, 1357, 1453, 1549, 1648, 1747, 1846, 1947};
-uint32_t saw_LUT[NS] = {0, 32, 64, 96, 128, 161, 193, 225, 257, 290, 322, 354, 386, 419, 451, 483, 515, 548, 580, 612, 644, 677, 709, 741, 773, 806, 838, 870, 902, 935, 967, 999, 1031, 1064, 1096, 1128, 1160, 1193, 1225, 1257, 1289, 1322, 1354, 1386, 1418, 1450, 1483, 1515, 1547, 1579, 1612, 1644, 1676, 1708, 1741, 1773, 1805, 1837, 1870, 1902, 1934, 1966, 1999, 2031, 2063, 2095, 2128, 2160, 2192, 2224, 2257, 2289, 2321, 2353, 2386, 2418, 2450, 2482, 2515, 2547, 2579, 2611, 2644, 2676, 2708, 2740, 2772, 2805, 2837, 2869, 2901, 2934, 2966, 2998, 3030, 3063, 3095, 3127, 3159, 3192, 3224, 3256, 3288, 3321, 3353, 3385, 3417, 3450, 3482, 3514, 3546, 3579, 3611, 3643, 3675, 3708, 3740, 3772, 3804, 3837, 3869, 3901, 3933, 3966, 3998, 4030, 4062, 4095};
-uint32_t triangle_LUT[NS] = {0, 127, 255, 383, 511, 639, 767, 895, 1023, 1151, 1279, 1407, 1535, 1663, 1791, 1919, 2047, 2175, 2303, 2431, 2559, 2687, 2815, 2943, 3071, 3199, 3327, 3455, 3583, 3711, 3839, 3967, 4095, 4222, 4350, 4478, 4606, 4734, 4862, 4990, 5118, 5246, 5374, 5502, 5630, 5758, 5886, 6014, 6142, 6270, 6398, 6526, 6654, 6782, 6910, 7038, 7166, 7294, 7422, 7550, 7678, 7806, 7934, 8062, 8190, 8062, 7934, 7806, 7678, 7550, 7422, 7294, 7166, 7038, 6910, 6782, 6654, 6526, 6398, 6270, 6142, 6014, 5886, 5758, 5630, 5502, 5374, 5246, 5118, 4990, 4862, 4734, 4606, 4478, 4350, 4222, 4095, 3967, 3839, 3711, 3583, 3455, 3327, 3199, 3071, 2943, 2815, 2687, 2559, 2431, 2303, 2175, 2047, 1919, 1791, 1663, 1535, 1407, 1279, 1151, 1023, 895, 767, 639, 511, 383, 255, 127};
-
-uint32_t piano_LUT[NS] = {
-   2047, 2183, 1984, 2098, 2061, 2088, 2038, 2158,
-   2097, 2153, 2084, 2054, 2016, 2333, 2059, 1765,
-   2027, 2045, 1970, 2055, 2063, 2051, 1583, 2022,
-   2334, 2044, 2884, 1692, 1759, 1843, 2242, 2195,
-   1531, 2163, 1969, 2061, 1987, 2088, 1733, 1952,
-   1934, 2101, 2252, 1924, 2253, 1929, 2616, 2030,
-   2097, 2063, 1985, 2063, 2024, 2037, 2818, 1944,
-   2393, 1867, 2000, 1949, 1472, 1911, 1691, 2035,
-   1778, 2070, 2143, 2047, 2015, 2021, 1718, 2153,
-   1902, 2086, 1794, 2456, 2201, 2032, 2360, 2175,
-   2027, 2043, 2004, 2072, 2034, 2041, 2187, 2053,
-   2089, 1928, 1843, 2034, 2011, 2226, 2009, 2107,
-   2347, 2052, 2077, 2038, 2071, 2023, 1754, 1922,
-   1992, 1996, 2162, 2084, 2036, 1999, 1837, 2150,
-   2005, 2079, 1997, 2072, 2031, 2060, 1942, 1911,
-   1604, 1780, 2077, 2056, 2001, 1938, 2094, 2047,
+//Task 1
+//these values were produced using lookup tables in python code, each has a minimum of 128 values
+uint32_t Sin_LUT[NS] = {2048, 2148, 2248, 2348, 2447, 2545, 2642, 2737, 2831, 2923, 3013, 3100, 3185, 3267, 3346, 3423, 3495, 3565, 3630, 3692, 3750, 3804, 3853, 3898, 3939, 3975, 4007, 4034, 4056, 4073, 4085, 4093, 4095, 4093, 4085, 4073, 4056, 4034, 4007, 3975, 3939, 3898, 3853, 3804, 3750, 3692, 3630, 3565, 3495, 3423, 3346, 3267, 3185, 3100, 3013, 2923, 2831, 2737, 2642, 2545, 2447, 2348, 2248, 2148, 2048, 1947, 1847, 1747, 1648, 1550, 1453, 1358, 1264, 1172, 1082, 995, 910, 828, 749, 672, 600, 530, 465, 403, 345, 291, 242, 197, 156, 120, 88, 61, 39, 22, 10, 2, 0, 2, 10, 22, 39, 61, 88, 120, 156, 197, 242, 291, 345, 403, 465, 530, 600, 672, 749, 828, 910, 995, 1082, 1172, 1264, 1358, 1453, 1550, 1648, 1747, 1847, 1947};
+uint32_t Saw_LUT[NS] = {0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928, 960, 992, 1024, 1056, 1088, 1120, 1152, 1184, 1216, 1248, 1280, 1312, 1344, 1376, 1408, 1440, 1472, 1504, 1536, 1568, 1600, 1632, 1664, 1696, 1728, 1760, 1792, 1824, 1856, 1888, 1920, 1952, 1984, 2016, 2048, 2079, 2111, 2143, 2175, 2207, 2239, 2271, 2303, 2335, 2367, 2399, 2431, 2463, 2495, 2527, 2559, 2591, 2623, 2655, 2687, 2719, 2751, 2783, 2815, 2847, 2879, 2911, 2943, 2975, 3007, 3039, 3071, 3103, 3135, 3167, 3199, 3231, 3263, 3295, 3327, 3359, 3391, 3423, 3455, 3487, 3519, 3551, 3583, 3615, 3647, 3679, 3711, 3743, 3775, 3807, 3839, 3871, 3903, 3935, 3967, 3999, 4031, 4063};
+uint32_t Triangle_LUT[NS] = {0, 64, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984, 2048, 2111, 2175, 2239, 2303, 2367, 2431, 2495, 2559, 2623, 2687, 2751, 2815, 2879, 2943, 3007, 3071, 3135, 3199, 3263, 3327, 3391, 3455, 3519, 3583, 3647, 3711, 3775, 3839, 3903, 3967, 4031, 4095, 4031, 3967, 3903, 3839, 3775, 3711, 3647, 3583, 3519, 3455, 3391, 3327, 3263, 3199, 3135, 3071, 3007, 2943, 2879, 2815, 2751, 2687, 2623, 2559, 2495, 2431, 2367, 2303, 2239, 2175, 2111, 2048, 1984, 1920, 1856, 1792, 1728, 1664, 1600, 1536, 1472, 1408, 1344, 1280, 1216, 1152, 1088, 1024, 960, 896, 832, 768, 704, 640, 576, 512, 448, 384, 320, 256, 192, 128, 64};
+uint32_t Piano_LUT[NS] = {4094, 4095, 4092, 4085, 4072, 4052, 4028, 4001, 3971, 3937, 3898, 3853, 3803, 3750, 3690, 3624, 3554, 3481, 3401, 3313, 3221, 3128, 3032, 2932, 2829, 2722, 2613, 2505, 2397, 2286, 2174, 2061, 1946, 1831, 1718, 1606, 1495, 1387, 1283, 1181, 1081, 985, 891, 799, 711, 628, 550, 477, 410, 346, 285, 233, 186, 146, 110, 79, 52, 30, 15, 6, 1, 0, 3, 12, 27, 47, 71, 100, 132, 169, 209, 254, 304, 360, 419, 479, 543, 608, 675, 745, 814, 883, 954, 1026, 1098, 1170, 1241, 1312, 1383, 1451, 1517, 1580, 1640, 1700, 1756, 1809, 1857, 1901, 1942, 1980, 2015, 2046, 2073, 2094, 2112, 2128, 2141, 2151, 2157, 2160, 2160, 2155, 2147, 2136, 2121, 2102, 2081, 2056, 2028, 2000, 1971, 1939, 1905, 1873, 1840, 1806, 1772, 1737};
+uint32_t Guitar_LUT[NS] = {1524, 1425, 1321, 1201, 1076, 965, 874, 792, 716, 646, 583, 536, 515, 500, 471, 435, 411, 390, 363, 326, 279, 232, 202, 183, 159, 130, 105, 71, 35, 10, 2, 0, 8, 37, 92, 174, 276, 383, 469, 537, 614, 69};
+uint32_t Drum_LUT[NS] = {
+  0, 188, 150, 75, 274, 682, 951, 1091, 1338, 1456, 1489, 1924, 2381, 2182, 1612, 1075,
+  838, 1209, 1730, 2031, 2617, 3289, 3214, 2655, 2494, 2966, 3423, 3176, 2649, 2590, 2816, 2945,
+  2811, 2332, 2144, 2730, 3439, 3864, 4095, 3950, 3740, 3977, 3945, 3165, 2601, 2811, 3155, 3235,
+  3203, 3122, 3117, 3278, 3461, 3321, 2778, 2322, 2203, 2064, 2176, 2983, 3773, 3998, 3842, 3267,
+  2655, 2424, 2193, 2219, 2864, 3278, 3203, 3085, 2837, 2794, 2913, 2429, 2037, 2504, 2875, 2848,
+  2880, 2606, 2053, 1671, 1537, 1945, 2746, 2934, 2418, 1983, 1790, 1714, 1929, 2085, 1542, 774,
+  774, 1370, 1773, 1628, 1134, 1016, 1483, 1870, 2069, 2316, 2236, 1730, 1182, 688, 430, 591,
+  983, 1424, 1704, 1698, 1526, 1322, 1231, 1263, 978, 441, 408, 844, 1000, 876, 967, 1037
 };
-uint32_t guitar_LUT[NS] = {
-   2047, 2362, 2360, 2123, 2097, 1861, 1833, 2015,
-   1534, 2092, 2080, 2052, 2087, 2075, 1893, 2036,
-   2043, 2027, 1705, 2501, 1916, 1896, 2466, 2231,
-   1775, 2052, 2015, 2062, 2036, 1994, 1964, 2054,
-   2052, 2098, 1856, 2149, 1858, 2127, 2003, 1750,
-   2249, 2024, 2056, 2052, 2064, 1933, 2144, 2041,
-   1876, 2006, 2183, 2009, 2191, 2143, 1891, 2005,
-   2146, 2139, 2095, 1827, 2163, 2097, 2761, 2230,
-   2106, 2230, 2269, 2247, 2138, 2119, 1591, 1686,
-   2065, 2040, 2079, 2063, 2268, 2044, 2032, 2056,
-   2165, 2180, 1801, 2129, 2079, 1737, 2126, 1881,
-   2087, 2101, 2046, 2033, 1959, 1889, 2115, 2045,
-   2289, 1971, 2244, 1984, 2030, 2005, 2520, 2424,
-   2011, 2052, 2034, 2041, 2117, 1936, 2045, 2051,
-   1932, 2027, 2157, 1895, 2298, 1944, 2213, 1654,
-   2105, 1854, 2386, 1905, 1640, 2618, 1933, 2048,
-};
-uint32_t drum_LUT[NS] = {
-		   2047, 3396, 1864, 2110, 2063, 3400, 1893, 1933,
-		   2086, 2144, 2036, 2030, 2039, 1949, 1414, 1848,
-		   2091, 2032, 2044, 2059, 2048, 2093, 2044, 2020,
-		   2094, 1803, 2072, 2045, 2173, 2017, 3235, 1276,
-		   1671, 2193, 2436, 2104, 1931, 2062, 2028, 2032,
-		   4095, 1922, 2035, 2042, 2502, 2372, 1820, 1996,
-		   2284, 2072, 2018, 2051, 671, 2425, 2075, 2068,
-		   17, 2239, 2042, 2023, 2192, 2052, 2902, 2386,
-		   4073, 2009, 2285, 2038, 2518, 2711, 2048, 2096,
-		   1629, 2001, 2086, 2043, 2549, 1894, 2061, 2076,
-		   2001, 2055, 2043, 2049, 2098, 2047, 2065, 2047,
-		   2923, 2071, 2017, 2080, 2018, 2049, 1831, 2014,
-		   837, 2295, 1978, 2040, 1980, 2036, 2106, 2042,
-		   1643, 2055, 2066, 2032, 2050, 2442, 2145, 2218,
-		   2126, 2032, 2038, 1781, 2154, 2441, 2132, 4095,
-		   2150, 2012, 2036, 1615, 1981, 323, 2525, 2047,
-		};
 
+//global variables for waveform switching needed for task 5
+WaveformType current_waveform = WAVE_SINE;
+const uint32_t* current_lut = Sin_LUT;
+const char* waveform_names[] = {"Sine", "Sawtooth", "Triangle", "Piano", "Guitar", "Drum"};
 
-
-
+//global variable for debouncing
+static uint32_t last_tick = 0;
 
 // TODO: Equation to calculate TIM2_Ticks
-enum { TIM2_Ticks = (uint32_t)(TIM2CLK / (NS * F_SIGNAL)) }; // How often to write new LUT value -- TIM2CLK/NS*FSIGNAL
+//Task 3
+//tim2_ticks= Clock freq/ freq output signal x number of samples in lut: 16000000/1000x128 = 125-1 ticks
+// TIM2_Ticks (ARR) = (TIM2CLK / F_sample) - 1
+// TIM2_Ticks = (16,000,000 / (1000 * 128)) - 1 = 125 - 1 = 124
+uint32_t TIM2_Ticks = (TIM2CLK /(F_SIGNAL*NS)) - 1; // How often to write new LUT value
 uint32_t DestAddress = (uint32_t) &(TIM3->CCR3); // Write LUT TO TIM3->CCR3 to modify PWM duty cycle
-
-
-uint32_t *waveforms[NUM_WAVEFORMS] = {
-    sine_LUT, saw_LUT, triangle_LUT, piano_LUT, guitar_LUT, drum_LUT
-};
-char *waveform_names[NUM_WAVEFORMS] = {
-    "Sine", "Sawtooth", "Triangle", "Piano", "Guitar", "Drum"
-};
-
-volatile uint8_t waveform_index = 0;
-
-// --- Debounce support ---
-volatile uint32_t last_button_tick = 0;
 
 
 /* USER CODE END PV */
@@ -142,12 +113,30 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+
+
 /* USER CODE BEGIN PFP */
 void EXTI0_IRQHandler(void);
+
+//helps to display LCD
+void display_waveform(const char* name);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void display_waveform(const char* name) {
+    lcd_command(0xC0); //moves cursor to the second line of the LCD
+    //lcd_putstring("Waveform: ");
+    lcd_putstring((char*)name);  //prints waveforms name
+    //clear the rest of the line if the new name is shorter
+    if (strlen(name) < 10) {  //10 character spaces for waveform name
+        for(int i = 0; i < (10 - strlen(name)); i++) {
+            lcd_putchar(' ');
+        }
+    }
+}
+
 
 /* USER CODE END 0 */
 
@@ -183,28 +172,29 @@ int main(void)
   MX_DMA_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  init_LCD();
   /* USER CODE BEGIN 2 */
+  //initialise LCD
+  init_LCD();
+  lcd_command(CLEAR);
+
+  //Task 4
   // TODO: Start TIM3 in PWM mode on channel 3
-  	 if(HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_3) != HAL_OK){
-  		 Error_Handler();
-  	 }
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
   // TODO: Start TIM2 in Output Compare (OC) mode on channel 1
-  	 if(HAL_TIM_OC_Start(&htim2,TIM_CHANNEL_1) != HAL_OK){
-  		 Error_Handler();
-  	 }
+  HAL_TIM_OC_Start(&htim2, TIM_CHANNEL_1);
+
   // TODO: Start DMA in IT mode on TIM2->CH1. Source is LUT and Dest is TIM3->CCR3; start with Sine LUT
-  	 if(HAL_DMA_Start_IT(&hdma_tim2_ch1,	//source memory address
-  			 	 	 	 (uint32_t)sine_LUT,
-						 (uint32_t)&(htim3.Instance->CCR3),NS) != HAL_OK) //destination address
-  	 {
-  		 Error_Handler();
-  	 }
+  HAL_DMA_Start_IT(&hdma_tim2_ch1, (uint32_t)current_lut, DestAddress, NS);
+
   // TODO: Write current waveform to LCD(Sine is the first waveform)
-  	init_LCD();
-  	lcd_putstring("Sine");
+  display_waveform(waveform_names[current_waveform]);
+
   // TODO: Enable DMA (start transfer from LUT to CCR)
-  	__HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
+  //uses HAL ENABLE DMA to start DMA transfer
+  ////enables TIM2_CH1 to trigger DMA request
+  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -212,8 +202,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  // The DMA + TIM2 hardware is doing the waveform generation; CPU can be idle or do other tasks
-	 HAL_Delay(1000);
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -282,7 +271,8 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = TIM2_Ticks - 1;
+  //set to tim2 ticks to control the DMA trigger frequency=124 using calculated TIM2_Ticks value
+  htim2.Init.Period = TIM2_Ticks;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -327,6 +317,9 @@ static void MX_TIM2_Init(void)
   hdma_tim2_ch1.Init.Priority = DMA_PRIORITY_HIGH;
   hdma_tim2_ch1.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
 
+  //set DMA peripheral address to TIM3->CCR3
+  //hdma_tim2_ch1.Init.PeriphAddress = DestAddress;
+
   if (HAL_DMA_Init(&hdma_tim2_ch1) != HAL_OK)
   {
       Error_Handler();
@@ -360,7 +353,8 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
+  //this timer value needs to match the 12bit DAC resolution=4095
+  htim3.Init.Period = 4095;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -429,6 +423,8 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
 
   // -------------------------------
   // LCD pins configuration
@@ -470,45 +466,68 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void EXTI0_IRQHandler(void)
-{
-    // Was this PA0?
-    if (__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) != RESET)
-    {
-        uint32_t now = HAL_GetTick();
+void EXTI0_IRQHandler(void){
 
-        // Clear the EXTI flag early
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+	//check if interrupt pin is PA0(Button0_Pin)
+	if (__HAL_GPIO_EXTI_GET_IT(Button0_Pin) != RESET){
+		// TODO: Debounce using HAL_GetTick()
+		uint32_t current_tick = HAL_GetTick();
 
-        // Debounce: ignore if <200 ms since last valid press
-        if ((now - last_button_tick) < 200U) {
-            return;
-        }
-        last_button_tick = now;
+		// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
+		// HINT: Consider using C's "switch" function to handle LUT changes
 
-        // 1) Stop TIM2 CC1 DMA requests and abort any in-flight transfer
-        __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
-        HAL_DMA_Abort_IT(htim2.hdma[TIM_DMA_ID_CC1]);   // safe to call even if idle
+		if (current_tick - last_tick >= DEBOUNCE_DELAY){
+			last_tick = current_tick;
+			//goes to next waveform
+			current_waveform = (current_waveform + 1) % NUM_WAVEFORMS;
 
-        // 2) Advance waveform (wrap 0..NUM_WAVEFORMS-1)
-        waveform_index = (uint8_t)((waveform_index + 1U) % NUM_WAVEFORMS);
+			//select the correct lookup table
+		switch(current_waveform){
+			case WAVE_SINE:
+				current_lut = Sin_LUT;
+				break;
+			case WAVE_SAW:
+				current_lut = Saw_LUT;
+				break;
+			case WAVE_TRIANGLE:
+				current_lut = Triangle_LUT;
+				break;
+			case WAVE_PIANO:
+				current_lut = Piano_LUT;
+				break;
+			case WAVE_GUITAR:
+				current_lut = Guitar_LUT;
+				break;
+			case WAVE_DRUM:
+				current_lut = Drum_LUT;
+				break;
+			default:
+				current_lut = Sin_LUT;
+				break;
+			}
 
-        // 3) Update the LCD label
-        lcd_command(CLEAR);
-        lcd_putstring((char*)waveform_names[waveform_index]);
+		//stop DMA transfer before changing source address
+		//disable ch1 DMA to allow safe restart
+		__HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
 
-        // 4) Re-start DMA with the NEW source buffer → TIM3->CCR3, length = NS
-        if (HAL_DMA_Start_IT(&hdma_tim2_ch1,
-                             (uint32_t)waveforms[waveform_index],     // <— NEW LUT
-                             (uint32_t)&(htim3.Instance->CCR3),       // destination
-                             NS) != HAL_OK)
-        {
-            Error_Handler();
-        }
+		//stop previous DMA transfer
+		HAL_DMA_Abort_IT(&hdma_tim2_ch1);
 
-        // 5) Re-enable TIM2 CC1 DMA requests so samples resume on next CC1 event
-        __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
-    }
+		//start new DMA transfer with new lut
+		//since DMA circular have to set up again with new source address
+		HAL_DMA_Start_IT(&hdma_tim2_ch1, (uint32_t)current_lut, DestAddress, NS);
+
+		//enable DMA request in timer again
+		__HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
+
+		//update LCD with current waveform name
+		display_waveform(waveform_names[current_waveform]);
+		}
+
+		//clear interrupt flags
+		HAL_GPIO_EXTI_IRQHandler(Button0_Pin);
+	}
+
 }
 /* USER CODE END 4 */
 
@@ -542,3 +561,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
